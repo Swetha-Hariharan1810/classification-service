@@ -1,0 +1,13 @@
+boto3
+pika
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0
+pydantic>=1.10.13
+pydantic-settings
+uuid
+regex
+datetime
+wheel
+setuptools
+PyYAML
+numpy>=1.26.4

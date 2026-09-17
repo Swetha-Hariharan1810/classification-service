@@ -1,0 +1,65 @@
+version: '3.7'
+
+services:
+  class-service:
+    user: "999:1099"
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: classification-service:ci
+    environment:
+      - AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+      - AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN
+      - RABBITMQ_SERVER_URL=amqp://platform_producer:platform_producer@rabbitmq:5672
+      - IP_QUEUE_NAME=class_queue
+      - RESP_QUEUE_NAME=platform_resp_queue
+      - NUM_THREADS=$NUM_THREADS
+      - CLASS_MODEL_VERSION=v10tb-1.2-1.4_1.2_1-lr5e-05-u5075-f4
+      - CLASS_MODEL_URL=s3://birchai-dev-test-bucket/models/classification/v10tb-1.2-1.4_1.2_1-lr5e-05-u5075-f4.zip
+      - CLASS_MODEL_NAME=1.2-1.4_1.2_1-lr5e-05-u5075-f4.ckpt.jit
+    # volumes:
+    #   - ./src:/home/ubuntu/codebase/src
+    #   - ./data:/home/ubuntu/codebase/data
+    restart: always
+    tty: true
+    # keeps running container after exit
+    # command: tail -f /dev/null
+    command: python3 src/rmq_listener.py
+    depends_on:
+      - rabbitmq
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    volumes:
+      - ../.github/rmq/definitions.json:/etc/rabbitmq/definitions.json
+      - ../.github/rmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+    ports:
+      - 5672:5672
+      - 15672:15672
+
+    restart: always
+    #tty: true
+    #command: tail -f /dev/null
+
+  send-msg:
+    image: python:3.12-slim
+    volumes:
+      - ../.github/data/inputs:/data/inputs
+
+    restart: 'no'
+    # command: tail -f /dev/null
+    entrypoint: [ "/bin/sh", "-c" ]
+    command:
+      - |
+        sleep 120
+        apt update && apt install wget -y
+        wget https://raw.githubusercontent.com/rabbitmq/rabbitmq-management/v3.7.8/bin/rabbitmqadmin
+        chmod 777 ./rabbitmqadmin
+        cat /data/inputs/summary_1.txt | ./rabbitmqadmin -H rabbitmq -u platform_producer -p platform_producer publish exchange=amq.default routing_key=class_queue
+        sleep 60
+        ./rabbitmqadmin -H rabbitmq -u platform_producer -p platform_producer get queue=platform_resp_queue ackmode=ack_requeue_false | grep 'PROCESSING'
+        ./rabbitmqadmin -H rabbitmq -u platform_producer -p platform_producer get queue=platform_resp_queue ackmode=ack_requeue_false | grep 'COMPLETED'
+    depends_on:
+      - rabbitmq
+      - class-service
