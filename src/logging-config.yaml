@@ -1,0 +1,33 @@
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  simple:
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  extended:
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s"
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: DEBUG
+    formatter: extended
+loggers:
+  s3transfer:
+    level: WARNING
+    handlers: [console]
+    propagate: false
+  botocore:
+    level: WARNING
+    handlers: [console]
+    propagate: false
+  boto3:
+    level: WARNING
+    handlers: [console]
+    propagate: false
+  pika:
+    level: WARNING
+    handlers: [console]
+    propagate: false
+root:
+  level: INFO
+  handlers: [console]
