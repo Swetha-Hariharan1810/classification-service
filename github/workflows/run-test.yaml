@@ -1,0 +1,52 @@
+name: dev - Run tests
+on:
+  pull_request:
+    branches:
+      - develop
+
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
+        required: false
+        default: false
+jobs:
+  test-with-docker:
+    name: run tests
+    runs-on: ${{ matrix.os }}
+    environment: develop
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04]
+        python-version: ["3.12"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        # with:
+        #   submodules: true
+        # token: ${{ secrets.GH_PAT }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: test with rmq
+        id: integration-test-rmq
+        run: |
+          export NUM_THREADS=$(nproc)
+          docker compose -f docker/docker-compose.ci.yaml build
+          docker compose -f docker/docker-compose.ci.yaml up class-service &
+          sleep 60
+          docker compose -f docker/docker-compose.ci.yaml logs class-service
+          docker compose -f docker/docker-compose.ci.yaml up --exit-code-from send-msg -- send-msg
+      - name: "Setup tmate session"
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ failure() && inputs.debug_enabled }}

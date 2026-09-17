@@ -1,0 +1,80 @@
+name: Image Build and Scan
+
+on:
+  pull_request:
+    branches:
+      - develop
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
+        required: false
+        default: false
+jobs:
+  build-cli:
+    name: build-cli
+    runs-on: ubuntu-latest-4-cores
+    env:
+      PROJECT_KEY: birch-engineering-classification-service # Set the desired project to run the cli scanning with
+
+    steps:
+      # checks-out your repository under $GitHub_WORKSPACE, so your workflow can access it.
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      # Build your docker image, that is going to be scanned in the next step
+      - name: Docker Image Build
+        id: build
+        run: |
+          git_hash=$(git rev-parse --short "${{ github.sha }}")
+          safe_branch=$(echo "${{ github.ref_name }}" | tr '/[:upper:] ' '-' )
+          image_tag="${safe_branch}-${git_hash}"
+
+          docker build -t $image_tag -f docker/Dockerfile .
+          echo "image_tag=$image_tag" >> $GITHUB_OUTPUT
+
+      # Run Orca CLI against the previously created container image
+      # - name: Orca CLI - Security Scanning
+      #   env:
+      #     ORCA_SECURITY_API_TOKEN: ${{ secrets.ORCA_SECURITY_API_TOKEN }}
+      #   run: |
+      #     set +e
+      #     apt update && apt install -y curl
+      #     git_hash=$(git rev-parse --short "${{ github.sha }}")
+      #     image_tag="${{ github.ref_name }}-$git_hash"
+      #     curl -sfL 'https://raw.GitHubusercontent.com/orcasecurity/orca-cli/main/install.sh' | bash
+      #     orca-cli -p "${PROJECT_KEY}" image scan $image_tag --disable-secret
+      - name: Tenable Generic Docker - Security Scanning  
+        env:
+          TENABLE_API_TOKEN: ${{ secrets.TENABLE_API_TOKEN }}
+          TENABLE_API_URL: ${{ secrets.TENABLE_API_URL }}
+          COMMIT_USER: ${{ github.actor }}
+        run: |
+          set -e
+          echo "Running Tenable Cloud Security Scanner..."
+          mkdir -p tenable-output
+
+          docker run \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          -v "$(pwd)/tenable-output:/docker-output" \
+          --pull=always \
+          tenable/cloud-security-scanner:latest container-image scan \
+            --api-token "${TENABLE_API_TOKEN}" \
+            --api-url "${TENABLE_API_URL}" \
+            --code-branch "${GITHUB_REF_NAME}" \
+            --code-commit-hash "${GITHUB_SHA}" \
+            --code-commit-user "${COMMIT_USER}" \
+            --code-repository-url "https://github.com/${GITHUB_REPOSITORY}.git" \
+            --name "${{ steps.build.outputs.image_tag }}" \
+            --fail-on-min-severity high \
+            --output-file-formats j-unit \
+            --output-path /docker-output
+
+      - name: Publish Tenable scan report
+        if: always()
+        uses: mikepenz/action-junit-report@v5
+        with:
+          report_paths: 'tenable-output/*.xml'
+          check_name: 'Tenable Container Scan'
+          annotate_only: true     

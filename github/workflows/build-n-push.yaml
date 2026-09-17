@@ -1,0 +1,61 @@
+name: dev - Build Docker image and push to Azure
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - ".github/workflows/build-n-push.yaml"
+      - "src/**"
+      - "*Dockerfile*"
+      - "requirements.txt"
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
+        required: false
+        default: false
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  build-n-push:
+    name: build docker image and push to acurecr dev
+
+    runs-on: ubuntu-latest-4-cores
+    environment: develop
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04]
+        python-version: ["3.12"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        # with:
+        #   submodules: true
+        # token: ${{ secrets.GH_PAT }}
+
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build, tag, and push docker image to azurecr
+        id: build-docker-push-acr
+        env:
+          REGISTRY: birchdevelop.azurecr.io
+          REPOSITORY: classification-service
+        run: |
+          az acr login -n birchdevelop.azurecr.io
+          git_hash=$(git rev-parse --short "${{ github.sha }}")
+          image_tag="${{ github.ref_name }}-$git_hash"
+          image_tag=`echo $image_tag | sed "s/\//_/g"`
+          docker build -t $REGISTRY/$REPOSITORY:$image_tag -f docker/Dockerfile .
+          docker push $REGISTRY/$REPOSITORY:$image_tag
+          echo "IMAGE_TAG=$image_tag" >> $GITHUB_OUTPUT
